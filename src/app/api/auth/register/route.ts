@@ -4,16 +4,41 @@ import { db } from '@/storage/database';
 import { users } from '@/storage/database/shared/schema';
 import { eq } from 'drizzle-orm';
 
+type TurnstileVerifyResult = {
+  success: boolean;
+  'error-codes'?: string[];
+};
+
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { username, password } = body;
+    const body = (await request.json()) as {
+      username?: string;
+      password?: string;
+      turnstileToken?: string;
+    };
+    const { username, password, turnstileToken } = body;
+    const turnstileSecretKey = process.env.TURNSTILE_SECRET_KEY;
 
     // 验证输入
     if (!username || !password) {
       return NextResponse.json(
         { error: '用户名和密码不能为空' },
         { status: 400 }
+      );
+    }
+
+    if (!turnstileToken) {
+      return NextResponse.json(
+        { error: '请先完成人机验证' },
+        { status: 400 }
+      );
+    }
+
+    if (!turnstileSecretKey) {
+      console.error('缺少 TURNSTILE_SECRET_KEY 环境变量');
+      return NextResponse.json(
+        { error: '服务端验证配置缺失' },
+        { status: 500 }
       );
     }
 
@@ -28,6 +53,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: '密码长度至少 6 个字符' },
         { status: 400 }
+      );
+    }
+
+    // 校验 Turnstile token
+    const verifyBody = new URLSearchParams({
+      secret: turnstileSecretKey,
+      response: turnstileToken,
+    });
+
+    const verifyResponse = await fetch(
+      'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: verifyBody.toString(),
+      }
+    );
+
+    if (!verifyResponse.ok) {
+      console.error('Turnstile 校验请求失败:', verifyResponse.status);
+      return NextResponse.json(
+        { error: '人机验证服务异常，请稍后重试' },
+        { status: 502 }
+      );
+    }
+
+    const verifyResult = (await verifyResponse.json()) as TurnstileVerifyResult;
+
+    if (!verifyResult.success) {
+      return NextResponse.json(
+        { error: '人机验证失败，请重试' },
+        { status: 403 }
       );
     }
 

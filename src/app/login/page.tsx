@@ -3,20 +3,31 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { Turnstile } from '@marsidev/react-turnstile';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+
 
 export default function LoginPage() {
   const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    if (!turnstileToken) {
+      setError('请先完成人机验证');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -25,7 +36,11 @@ export default function LoginPage() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({
+          username,
+          password,
+          turnstileToken,
+        }),
       });
 
       const data = await response.json();
@@ -117,9 +132,30 @@ export default function LoginPage() {
               </div>
             </div>
 
+            {siteKey ? (
+              <div className="flex justify-center">
+                <Turnstile
+                  siteKey={siteKey}
+                  onSuccess={(token) => {
+                    setTurnstileToken(token);
+                    setError('');
+                  }}
+                  onExpire={() => setTurnstileToken('')}
+                  onError={() => {
+                    setTurnstileToken('');
+                    setError('人机验证加载失败，请刷新重试');
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="bg-amber-50 border border-amber-200 text-amber-700 text-sm px-4 py-3 rounded-lg">
+                缺少 Turnstile Site Key，请先配置环境变量
+              </div>
+            )}
+
             <Button
               type="submit"
-              disabled={loading}
+              disabled={loading || !turnstileToken}
               className="w-full bg-gradient-to-r from-[#FF6B6B] to-[#4ECDC4] hover:opacity-90 text-white font-medium py-2.5 rounded-xl transition-opacity disabled:opacity-50"
             >
               {loading ? '登录中...' : '登录'}
