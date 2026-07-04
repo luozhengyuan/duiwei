@@ -14,10 +14,13 @@ export default function RegisterPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState('');
+  const [turnstileError, setTurnstileError] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+  const isDev = process.env.NODE_ENV === 'development';
+  const turnstileRequired = !!siteKey && !isDev;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,7 +37,7 @@ export default function RegisterPage() {
       return;
     }
 
-    if (!turnstileToken) {
+    if (!turnstileToken && turnstileRequired && !turnstileError) {
       setError('请先完成人机验证');
       return;
     }
@@ -165,24 +168,29 @@ export default function RegisterPage() {
                   siteKey={siteKey}
                   onSuccess={(token) => {
                     setTurnstileToken(token);
+                    setTurnstileError(false);
                     setError('');
                   }}
                   onExpire={() => setTurnstileToken('')}
                   onError={() => {
                     setTurnstileToken('');
-                    setError('人机验证加载失败，请刷新重试');
+                    setTurnstileError(true);
+                    if (turnstileRequired) {
+                      setError('人机验证加载失败，请刷新重试');
+                    }
                   }}
                 />
+                {turnstileError && !turnstileRequired && (
+                  <p className="text-xs text-amber-600 text-center mt-2">
+                    验证加载失败，当前环境可跳过验证
+                  </p>
+                )}
               </div>
-            ) : (
-              <div className="bg-amber-50 border border-amber-200 text-amber-700 text-sm px-4 py-3 rounded-lg">
-                缺少 Turnstile Site Key，请先配置环境变量
-              </div>
-            )}
+            ) : null}
 
             <Button
               type="submit"
-              disabled={loading || !turnstileToken}
+              disabled={loading || (turnstileRequired && !turnstileToken && !turnstileError)}
               className="w-full bg-gradient-to-r from-[#FF6B6B] to-[#4ECDC4] hover:opacity-90 text-white font-medium py-2.5 rounded-xl transition-opacity disabled:opacity-50"
             >
               {loading ? '注册中...' : '注册'}

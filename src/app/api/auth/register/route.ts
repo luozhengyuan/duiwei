@@ -18,6 +18,8 @@ export async function POST(request: NextRequest) {
     };
     const { username, password, turnstileToken } = body;
     const turnstileSecretKey = process.env.TURNSTILE_SECRET_KEY;
+    const isDev = process.env.NODE_ENV === 'development';
+    const turnstileRequired = !!turnstileSecretKey && !isDev;
 
     // 验证输入
     if (!username || !password) {
@@ -27,18 +29,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!turnstileToken) {
+    if (turnstileRequired && !turnstileToken) {
       return NextResponse.json(
         { error: '请先完成人机验证' },
         { status: 400 }
-      );
-    }
-
-    if (!turnstileSecretKey) {
-      console.error('缺少 TURNSTILE_SECRET_KEY 环境变量');
-      return NextResponse.json(
-        { error: '服务端验证配置缺失' },
-        { status: 500 }
       );
     }
 
@@ -56,38 +50,40 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 校验 Turnstile token
-    const verifyBody = new URLSearchParams({
-      secret: turnstileSecretKey,
-      response: turnstileToken,
-    });
+    // 校验 Turnstile token（仅在配置了密钥且非开发环境时）
+    if (turnstileRequired && turnstileToken) {
+      const verifyBody = new URLSearchParams({
+        secret: turnstileSecretKey,
+        response: turnstileToken,
+      });
 
-    const verifyResponse = await fetch(
-      'https://challenges.cloudflare.com/turnstile/v0/siteverify',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: verifyBody.toString(),
+      const verifyResponse = await fetch(
+        'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: verifyBody.toString(),
+        }
+      );
+
+      if (!verifyResponse.ok) {
+        console.error('Turnstile 校验请求失败:', verifyResponse.status);
+        return NextResponse.json(
+          { error: '人机验证服务异常，请稍后重试' },
+          { status: 502 }
+        );
       }
-    );
 
-    if (!verifyResponse.ok) {
-      console.error('Turnstile 校验请求失败:', verifyResponse.status);
-      return NextResponse.json(
-        { error: '人机验证服务异常，请稍后重试' },
-        { status: 502 }
-      );
-    }
+      const verifyResult = (await verifyResponse.json()) as TurnstileVerifyResult;
 
-    const verifyResult = (await verifyResponse.json()) as TurnstileVerifyResult;
-
-    if (!verifyResult.success) {
-      return NextResponse.json(
-        { error: '人机验证失败，请重试' },
-        { status: 403 }
-      );
+      if (!verifyResult.success) {
+        return NextResponse.json(
+          { error: '人机验证失败，请重试' },
+          { status: 403 }
+        );
+      }
     }
 
     // 检查用户名是否已存在
